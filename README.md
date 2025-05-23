@@ -1,2 +1,2 @@
 # H.AI-project-
-Idi naxuy
+Do not Idi naxuy
