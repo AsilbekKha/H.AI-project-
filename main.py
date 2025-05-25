@@ -93,3 +93,8 @@ print(classification_report(y_test_clf, y_pred_clf, zero_division=0))
 
 print("\n--- Распределение классов ---")
 print(data['Repeat_Visit'].value_counts(normalize=True))
+age_repeat_rate = data.groupby('Age')['Repeat_Visit'].mean().reset_index()
+
+feature_importances = model_clf.get_feature_importance()
+feature_names = model_clf.feature_names_
+
