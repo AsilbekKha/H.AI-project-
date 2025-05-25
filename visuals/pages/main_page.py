@@ -4,8 +4,8 @@ import pandas as pd
 from catboost import Pool
 
 # Загрузка моделей (проверьте пути)
-model_reg = joblib.load("../models/model_reg.pkl")
-model_clf = joblib.load("../models/model_clf.pkl")
+model_reg = joblib.load("visuals/models/model_reg.pkl")
+model_clf = joblib.load("visuals/models/model_clf.pkl")
 
 # Категориальные признаки
 cat_features = ['Gender', 'Weekday']
@@ -31,8 +31,7 @@ age = st.slider("Возраст клиента", 18, 70, 30)
 # Переводим время в минуты от начала суток
 entry_minutes = entry_hour * 60 + entry_minute
 exit_minutes = exit_hour * 60 + exit_minute
-
-# Проверка логики времени
+# main.py
 if exit_minutes < entry_minutes:
     st.error("Ошибка: Время выхода не может быть раньше времени входа.")
 else:
