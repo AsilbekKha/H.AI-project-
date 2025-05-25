@@ -4,8 +4,8 @@ import pandas as pd
 from catboost import Pool
 
 # Загрузка моделей (проверьте пути)
-model_reg = joblib.load("../models/model_reg.pkl")
-model_clf = joblib.load("../models/model_clf.pkl")
+model_reg = joblib.load("model_reg.pkl")
+model_clf = joblib.load("model_clf.pkl")
 
 # Категориальные признаки
 cat_features = ['Gender', 'Weekday']
