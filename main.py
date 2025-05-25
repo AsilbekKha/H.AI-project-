@@ -1,115 +1,95 @@
-import streamlit as st
-import pandas as pd
 from catboost import CatBoostRegressor, CatBoostClassifier, Pool
+import pandas as pd
+import joblib
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, accuracy_score, roc_auc_score, \
-    classification_report
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.metrics import accuracy_score, roc_auc_score, classification_report
 
+# Загрузка данных
+visits = pd.read_csv("tables/visits.csv")
+clients = pd.read_csv("tables/clients.csv")
+purchases = pd.read_csv("tables/purchases.csv")  # Пока не используется, но можно подключить при расширении модели
 
+# Вспомогательная функция
 def time_to_seconds(t):
     h, m, s = map(int, t.split(':'))
     return h * 3600 + m * 60 + s
 
+# Предобработка
+visits['Entry_Minutes'] = visits['Entry_Time'].apply(time_to_seconds)
+visits['Exit_Minutes'] = visits['Exit_Time'].apply(time_to_seconds)
+visits['Visit_Duration'] = visits['Exit_Minutes'] - visits['Entry_Minutes']
+visits = visits[visits['Visit_Duration'] > 0]
 
-@st.cache_data
-def load_data():
-    visits = pd.read_csv("tables/visits.csv")
-    clients = pd.read_csv("tables/clients.csv")
-    purchases = pd.read_csv("tables/purchases.csv")
-    return visits, clients, purchases
+data = visits.merge(clients, left_on='Client_ID', right_on='ClientID')
 
+visit_counts = data.groupby('Client_ID')['Visit_ID'].count().reset_index()
+visit_counts['Repeat_Visit'] = (visit_counts['Visit_ID'] > 1).astype(int)
+data = data.merge(visit_counts[['Client_ID', 'Repeat_Visit']], on='Client_ID')
 
-def preprocess_data(visits, clients):
-    visits['Entry_Minutes'] = visits['Entry_Time'].apply(time_to_seconds)
-    visits['Exit_Minutes'] = visits['Exit_Time'].apply(time_to_seconds)
-    visits['Visit_Duration'] = visits['Exit_Minutes'] - visits['Entry_Minutes']
-    visits = visits[visits['Visit_Duration'] > 0]
+# Признаки
+X = data.drop(columns=[
+    'Visit_Duration', 'Visit_ID', 'Client_ID', 'ClientID', 'Name',
+    'Entry_Time', 'Exit_Time', 'Date', 'Visit_Purpose', 'PhoneNumber', 'Repeat_Visit'
+])
 
-    data = visits.merge(clients, left_on='Client_ID', right_on='ClientID')
+categorical_features = ['Gender', 'Weekday']
+cat_features_indices = [X.columns.get_loc(col) for col in categorical_features]
 
-    visit_counts = data.groupby('Client_ID')['Visit_ID'].count().reset_index()
-    visit_counts['Repeat_Visit'] = (visit_counts['Visit_ID'] > 1).astype(int)
-    data = data.merge(visit_counts[['Client_ID', 'Repeat_Visit']], on='Client_ID')
+# ===================== РЕГРЕССИЯ =====================
+y_reg = data['Visit_Duration']
+X_train_reg, X_test_reg, y_train_reg, y_test_reg = train_test_split(
+    X, y_reg, test_size=0.2, random_state=42
+)
 
-    X = data.drop(columns=[
-        'Visit_Duration', 'Visit_ID', 'Client_ID', 'ClientID', 'Name',
-        'Entry_Time', 'Exit_Time', 'Date', 'Visit_Purpose', 'PhoneNumber', 'Repeat_Visit'
-    ])
+train_pool_reg = Pool(X_train_reg, y_train_reg, cat_features=cat_features_indices)
+test_pool_reg = Pool(X_test_reg, y_test_reg, cat_features=cat_features_indices)
 
-    categorical_features = ['Gender', 'Weekday']
-    cat_features_indices = [X.columns.get_loc(col) for col in categorical_features]
+model_reg = CatBoostRegressor(iterations=500, learning_rate=0.1, depth=6, random_seed=42, verbose=100)
+model_reg.fit(train_pool_reg)
 
-    return data, X, cat_features_indices
+print(model_reg.feature_names_)
 
+# Сохранение модели регрессии
+joblib.dump(model_reg, 'models/model_reg.pkl')
 
-def run_regression(data, X, cat_features_indices):
-    y_reg = data['Visit_Duration']
-    X_train, X_test, y_train, y_test = train_test_split(X, y_reg, test_size=0.2, random_state=42)
+# Оценка
+y_pred_reg = model_reg.predict(test_pool_reg)
+print("\n--- Регрессия (продолжительность визита) ---")
+print(f'MSE: {mean_squared_error(y_test_reg, y_pred_reg):.4f}')
+print(f'MAE: {mean_absolute_error(y_test_reg, y_pred_reg):.4f}')
+print(f'R^2: {r2_score(y_test_reg, y_pred_reg):.4f}')
 
-    train_pool = Pool(X_train, y_train, cat_features=cat_features_indices)
-    test_pool = Pool(X_test, y_test, cat_features=cat_features_indices)
+# ===================== КЛАССИФИКАЦИЯ =====================
+y_clf = data['Repeat_Visit']
+X_train_clf, X_test_clf, y_train_clf, y_test_clf = train_test_split(
+    X, y_clf, test_size=0.2, random_state=42, stratify=y_clf
+)
 
-    model = CatBoostRegressor(iterations=500, learning_rate=0.1, depth=6, random_seed=42, verbose=0)
-    model.fit(train_pool)
+train_pool_clf = Pool(X_train_clf, y_train_clf, cat_features=cat_features_indices)
+test_pool_clf = Pool(X_test_clf, y_test_clf, cat_features=cat_features_indices)
 
-    y_pred = model.predict(test_pool)
+model_clf = CatBoostClassifier(
+    iterations=500,
+    learning_rate=0.1,
+    depth=6,
+    random_seed=42,
+    verbose=100,
+    auto_class_weights='Balanced',
+    eval_metric='AUC'
+)
 
-    return {
-        'MSE': mean_squared_error(y_test, y_pred),
-        'MAE': mean_absolute_error(y_test, y_pred),
-        'R2': r2_score(y_test, y_pred)
-    }
+model_clf.fit(train_pool_clf, eval_set=test_pool_clf, use_best_model=True)
 
+joblib.dump(model_clf, 'models/model_clf.pkl')
 
-def run_classification(data, X, cat_features_indices):
-    y_clf = data['Repeat_Visit']
-    X_train, X_test, y_train, y_test = train_test_split(X, y_clf, test_size=0.2, random_state=42, stratify=y_clf)
+y_pred_proba_clf = model_clf.predict_proba(test_pool_clf)[:, 1]
+y_pred_clf = (y_pred_proba_clf >= 0.5).astype(int)
 
-    train_pool = Pool(X_train, y_train, cat_features=cat_features_indices)
-    test_pool = Pool(X_test, y_test, cat_features=cat_features_indices)
+print("\n--- Классификация (повторный визит) ---")
+print(f'Accuracy: {accuracy_score(y_test_clf, y_pred_clf):.4f}')
+print(f'ROC AUC: {roc_auc_score(y_test_clf, y_pred_proba_clf):.4f}')
+print(classification_report(y_test_clf, y_pred_clf, zero_division=0))
 
-    model = CatBoostClassifier(
-        iterations=500,
-        learning_rate=0.1,
-        depth=6,
-        random_seed=42,
-        verbose=0,
-        auto_class_weights='Balanced',
-        eval_metric='AUC'
-    )
-
-    model.fit(train_pool, eval_set=test_pool, use_best_model=True)
-
-    y_proba = model.predict_proba(test_pool)[:, 1]
-    y_pred = (y_proba >= 0.5).astype(int)
-
-    return {
-        'accuracy': accuracy_score(y_test, y_pred),
-        'roc_auc': roc_auc_score(y_test, y_proba),
-        'report': classification_report(y_test, y_pred, zero_division=0, output_dict=True),
-        'distribution': y_clf.value_counts(normalize=True)
-    }
-
-st.title("Анализ визитов клиентов")
-
-visits, clients, purchases = load_data()
-data, X, cat_features_indices = preprocess_data(visits, clients)
-
-tab1, tab2 = st.tabs(["📈 Регрессия", "📊 Классификация"])
-
-with tab1:
-    st.subheader("Предсказание продолжительности визита (регрессия)")
-    reg_metrics = run_regression(data, X, cat_features_indices)
-    st.metric("Mean Squared Error", f"{reg_metrics['MSE']:.2f}")
-    st.metric("Mean Absolute Error", f"{reg_metrics['MAE']:.2f}")
-    st.metric("R² Score", f"{reg_metrics['R2']:.2f}")
-
-with tab2:
-    st.subheader("Предсказание повторного визита (классификация)")
-    clf_metrics = run_classification(data, X, cat_features_indices)
-    st.metric("Accuracy", f"{clf_metrics['accuracy']:.2f}")
-    st.metric("ROC AUC", f"{clf_metrics['roc_auc']:.2f}")
-    st.write("Распределение классов:")
-    st.bar_chart(clf_metrics['distribution'])
-    st.write("Classification Report:")
-    st.json(clf_metrics['report'])
+print("\n--- Распределение классов ---")
+print(data['Repeat_Visit'].value_counts(normalize=True))
