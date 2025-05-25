@@ -11,7 +11,7 @@ clients = pd.read_csv("tables/clients.csv")
 purchases = pd.read_csv("tables/purchases.csv")  # Пока не используется, но можно подключить при расширении модели
 
 # Вспомогательная функция
-def time_to_seconds(t):
+def time_to_seconds(t): 
     h, m, s = map(int, t.split(':'))
     return h * 3600 + m * 60 + s
 
@@ -97,5 +97,38 @@ print(data['Repeat_Visit'].value_counts(normalize=True))
 age_repeat_rate = data.groupby('Age')['Repeat_Visit'].mean().reset_index()
 feature_importances = model_clf.get_feature_importance()
 feature_names = model_clf.feature_names_
+def load_and_preprocess():
+    visits = pd.read_csv("tables/visits.csv")
+    clients = pd.read_csv("tables/clients.csv")
+    visits['Entry_Minutes'] = visits['Entry_Time'].apply(time_to_seconds)
+    visits['Exit_Minutes'] = visits['Exit_Time'].apply(time_to_seconds)
+    visits['Visit_Duration'] = visits['Exit_Minutes'] - visits['Entry_Minutes']
+    visits = visits[visits['Visit_Duration'] > 0]
+    data = visits.merge(clients, left_on='Client_ID', right_on='ClientID')
+    return data
 
 
+def load_data():
+    visits = pd.read_csv("tables/visits.csv")
+    clients = pd.read_csv("tables/clients.csv")
+    purchases = pd.read_csv("tables/purchases.csv")
+    return visits, clients, purchases
+
+def preprocess_data(visits, clients):
+    # your preprocessing logic here, for example:
+    def time_to_seconds(t):
+        h, m, s = map(int, t.split(':'))
+        return h * 3600 + m * 60 + s
+    
+    visits['Entry_Minutes'] = visits['Entry_Time'].apply(time_to_seconds)
+    visits['Exit_Minutes'] = visits['Exit_Time'].apply(time_to_seconds)
+    visits['Visit_Duration'] = visits['Exit_Minutes'] - visits['Entry_Minutes']
+    visits = visits[visits['Visit_Duration'] > 0]
+    
+    data = visits.merge(clients, left_on='Client_ID', right_on='ClientID')
+    
+    visit_counts = data.groupby('Client_ID')['Visit_ID'].count().reset_index()
+    visit_counts['Repeat_Visit'] = (visit_counts['Visit_ID'] > 1).astype(int)
+    data = data.merge(visit_counts[['Client_ID', 'Repeat_Visit']], on='Client_ID')
+    
+    return data
